@@ -13,6 +13,7 @@ sequenceDiagram
     participant VR as ValidationLogic
     participant RS as Reserve Data
     participant IRS as InterestRateStrategy
+    participant Tok as Asset ERC20
     participant aT as AToken
 
     U->>LP: deposit(asset, amount, onBehalfOf)
@@ -21,7 +22,7 @@ sequenceDiagram
     LP->>RS: updateState()
     LP->>RS: updateInterestRates(asset, aToken, liquidityAdded = amount)
     RS->>IRS: calculateInterestRates(...)
-    LP->>aT: safeTransferFrom(user → aToken, amount)
+    LP->>Tok: safeTransferFrom(user → aToken, amount)
     LP->>aT: mint(onBehalfOf, amount, liquidityIndex)
     LP-->>U: emit Deposit
 ```
@@ -53,7 +54,7 @@ sequenceDiagram
         LP->>sD: mint(user, onBehalfOf, amount, currentStableRate)
     end
     LP->>RS: updateInterestRates(asset, aToken, liquidityTaken = amount)
-    LP->>aT: transferUnderlyingTo(user, amount)
+    aT-->>U: transferUnderlyingTo(amount)
     LP-->>U: emit Borrow
 ```
 
@@ -66,24 +67,34 @@ sequenceDiagram
     participant LP as LendingPool
     participant CM as CollateralManager
     participant PO as PriceOracle
-    participant RS as Reserve Snapshots
+    participant dR as Debt Reserve
+    participant cR as Collateral Reserve
     participant vD as VariableDebtToken
     participant sD as StableDebtToken
-    participant aT as AToken
+    participant aT as Collateral aToken
+    participant TokD as Debt ERC20
 
     K->>LP: liquidationCall(collateralAsset, debtAsset, user, repayAmount, receiveAToken)
     note right of LP: modifier whenNotPaused
     LP->>CM: delegatecall liquidation logic
     CM->>PO: fetch prices & recompute HF(user)
     CM-->>K: revert if HF ≥ 1
-    CM->>RS: cap repayAmount to CLOSE_FACTOR = 50%
+    CM->>dR: updateState()
+    CM->>CM: cap repayAmount to CLOSE_FACTOR = 50%
     alt Variable debt outstanding
-        CM->>vD: burn(amount / variableBorrowIndex)
+        CM->>vD: burn(user, amount/variableBorrowIndex)
     else Stable debt outstanding
-        CM->>sD: burn(principal share)
+        CM->>sD: burn(user, principal share)
     end
-    CM->>RS: updateState() & updateInterestRates(collateralAsset, debtAsset)
-    CM->>aT: burn user balance, transfer collateral (underlying or aTokens) to liquidator
+    CM->>dR: updateInterestRates(debtAsset, debtReserve.aToken, liquidityAdded = repayAmount)
+    alt receive aTokens
+        CM->>aT: transferOnLiquidation(user → liquidator, collateralAmount)
+    else receive underlying
+        CM->>cR: updateState()
+        CM->>cR: updateInterestRates(collateralAsset, aToken, liquidityTaken = collateralAmount)
+        CM->>aT: burn(user → liquidator, collateralAmount)
+    end
+    CM->>TokD: safeTransferFrom(liquidator → debtReserve.aToken, repayAmount)
     CM->>LP: return (NO_ERROR)
     LP-->>K: emit LiquidationCall
 ```
