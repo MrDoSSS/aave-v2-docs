@@ -15,7 +15,6 @@ Risk configuration in Aave v2 is managed per reserve via the `ReserveConfigurati
 | `stableBorrowRateEnabled` | bool | Reserve | If false, users can only open variable-rate borrows on the asset. |
 | `collateralEnabled` | bool | Reserve | Controls whether the asset can be used as collateral (set by configuring LTV/LT/bonus to non-zero values). |
 | `pause` / `freeze` | bool | Pool / Reserve | Safety switches. Pause stops all pool actions; freeze halts new supply/borrow/rate swaps on a specific reserve while allowing repayments and liquidations. |
-| `supplyCap` / `borrowCap` | n/a | V3 feature | Not present in Aave v2. Mentioned here for clarity; any caps must be enforced off-protocol. |
 
 ## Interest Rate Strategy Parameters
 

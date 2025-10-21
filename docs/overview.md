@@ -15,5 +15,3 @@ Aave v2 is a permissionless, overcollateralised liquidity protocol. Suppliers de
 - [`docs/risk-and-interest.md`](risk-and-interest.md) — reserve risk controls and interest-rate strategy maths.
 - [`docs/health-and-liquidations.md`](health-and-liquidations.md) — health factor definition, liquidation thresholds, worked examples.
 - [`docs/roles-and-config.md`](roles-and-config.md) — privileged roles, governance/multisig workflow, and configuration lifecycle.
-
-Throughout the docs, all rates are expressed in **basis points (bps)** or **ray (1e27)** as used on-chain. V3-only features (supply caps, isolation mode, eMode, cross-chain governance) are explicitly flagged and excluded from v2 coverage. References include the [Aave protocol v2 repository](https://github.com/aave/protocol-v2) and bundled whitepaper (`aave-v2-whitepaper.pdf`).*** End Patch***} to=functions.apply_patchannaq-signature codehaunted? Wait need plain apply patch tool, but previously we send JSON? I should send plain string. Need to follow format: no JSON. I'll redo. 

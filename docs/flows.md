@@ -1,10 +1,10 @@
 # Operational Flows
 
 ## Context
-This section walks through the critical end-to-end flows on Aave v2. The diagrams focus on validation order, index updates, and token mint/burn operations as implemented in `LendingPool.sol` and `LendingPoolCollateralManager.sol`.
+This section captures the runtime sequences of the most common Aave v2 operations. Each Mermaid diagram mirrors the order of validations, state updates, and token movements in `LendingPool.sol` and its collateral manager.
 
 ## Deposit → aToken Mint
-`LendingPool.deposit` is guarded by `whenNotPaused`. The pool accrues interest before minting to keep depositor shares consistent.
+`LendingPool.deposit` (guarded by `whenNotPaused`) accrues reserve indexes before minting aTokens so depositor shares remain proportional.
 
 ```mermaid
 sequenceDiagram
@@ -17,7 +17,7 @@ sequenceDiagram
     participant aT as AToken
 
     U->>LP: deposit(asset, amount, onBehalfOf)
-    note right of LP: modifier whenNotPaused
+    note right of LP: whenNotPaused
     LP->>VR: validateDeposit(reserve, amount)
     LP->>RS: updateState()
     LP->>RS: updateInterestRates(asset, aToken, liquidityAdded = amount)
@@ -27,8 +27,34 @@ sequenceDiagram
     LP-->>U: emit Deposit
 ```
 
+## Withdraw → aToken Burn
+`LendingPool.withdraw` burns aTokens, validates post-withdraw health, and sends underlying to the recipient (`whenNotPaused`).
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant LP as LendingPool
+    participant VR as ValidationLogic
+    participant RS as Reserve Data
+    participant aT as AToken
+    participant Tok as Asset ERC20
+
+    U->>LP: withdraw(asset, amount, to)
+    note right of LP: whenNotPaused
+    LP->>aT: balanceOf(user) → determine amountToWithdraw
+    LP->>VR: validateWithdraw(asset, amountToWithdraw, userBalance, accountData)
+    LP->>RS: updateState()
+    LP->>RS: updateInterestRates(asset, aToken, liquidityTaken = amountToWithdraw)
+    alt full balance withdrawn
+        LP->>LP: clear collateral flag for reserve
+    end
+    LP->>aT: burn(user → to, amountToWithdraw, liquidityIndex)
+    aT-->>Tok: transfer underlying to recipient
+    LP-->>U: emit Withdraw
+```
+
 ## Borrow → Debt Accounting
-`LendingPool.borrow` (also `whenNotPaused`) validates the post-borrow health factor, then mints the appropriate debt token, updates rates, and releases liquidity from the reserve’s aToken.
+`LendingPool.borrow` validates the borrower’s health factor, mints stable or variable debt, updates indexes, and releases underlying from the reserve (`whenNotPaused`).
 
 ```mermaid
 sequenceDiagram
@@ -43,7 +69,7 @@ sequenceDiagram
     participant aT as AToken
 
     U->>LP: borrow(asset, amount, rateMode, onBehalfOf)
-    note right of LP: modifier whenNotPaused
+    note right of LP: whenNotPaused
     LP->>PO: fetch collateral & debt prices
     LP->>VR: validateBorrow(userAccountData, amount, rateMode)
     LP-->>U: revert if HF < 1 post-borrow
@@ -58,8 +84,88 @@ sequenceDiagram
     LP-->>U: emit Borrow
 ```
 
+## Repay → Debt Burn
+`LendingPool.repay` burns stable or variable debt, increases reserve liquidity, and clears borrowing flags when balances reach zero (`whenNotPaused`).
+
+```mermaid
+sequenceDiagram
+    participant P as Payer
+    participant LP as LendingPool
+    participant VR as ValidationLogic
+    participant RS as Reserve Data
+    participant vD as VariableDebtToken
+    participant sD as StableDebtToken
+    participant Tok as Asset ERC20
+    participant aT as AToken
+
+    P->>LP: repay(asset, amount, rateMode, onBehalfOf)
+    note right of LP: whenNotPaused
+    LP->>VR: validateRepay(reserve, amount, debts)
+    LP->>RS: updateState()
+    alt Variable debt
+        LP->>vD: burn(onBehalfOf, paybackAmount, variableBorrowIndex)
+    else Stable debt
+        LP->>sD: burn(onBehalfOf, paybackAmount)
+    end
+    LP->>RS: updateInterestRates(asset, aToken, liquidityAdded = paybackAmount)
+    LP->>Tok: safeTransferFrom(payer → aToken, paybackAmount)
+    LP->>aT: handleRepayment(payer, paybackAmount)
+    alt debt fully cleared
+        LP->>LP: clear borrowing flag for reserve
+    end
+    LP-->>P: emit Repay
+```
+
+## Rate Mode Swap
+`LendingPool.swapBorrowRateMode` switches a position between stable and variable debt without changing principal (`whenNotPaused`).
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant LP as LendingPool
+    participant VR as ValidationLogic
+    participant RS as Reserve Data
+    participant vD as VariableDebtToken
+    participant sD as StableDebtToken
+
+    U->>LP: swapBorrowRateMode(asset, newMode)
+    note right of LP: whenNotPaused
+    LP->>VR: validateSwapRateMode(reserve, userConfig, debts, newMode)
+    LP->>RS: updateState()
+    alt New mode = Variable
+        LP->>sD: burn(user, stableDebt)
+        LP->>vD: mint(user, user, stableDebt, variableBorrowIndex)
+    else New mode = Stable
+        LP->>vD: burn(user, variableDebt, variableBorrowIndex)
+        LP->>sD: mint(user, user, variableDebt, currentStableRate)
+    end
+    LP->>RS: updateInterestRates(asset, aToken, liquidityAdded = 0, liquidityTaken = 0)
+    LP-->>U: emit Swap
+```
+
+## Stable Rate Rebalance
+`LendingPool.rebalanceStableBorrowRate` forces high-utilisation stable loans to the current stable rate to protect deposit yields (`whenNotPaused`).
+
+```mermaid
+sequenceDiagram
+    participant K as Keeper
+    participant LP as LendingPool
+    participant VR as ValidationLogic
+    participant RS as Reserve Data
+    participant sD as StableDebtToken
+
+    K->>LP: rebalanceStableBorrowRate(asset, user)
+    note right of LP: whenNotPaused
+    LP->>VR: validateRebalanceStableBorrowRate(reserve, asset, tokens, aToken)
+    LP->>RS: updateState()
+    LP->>sD: burn(user, stableDebt)
+    LP->>sD: mint(user, user, stableDebt, currentStableBorrowRate)
+    LP->>RS: updateInterestRates(asset, aToken, liquidityAdded = 0, liquidityTaken = 0)
+    LP-->>K: emit RebalanceStableBorrowRate
+```
+
 ## Liquidation Trigger & Settlement
-`LendingPool.liquidationCall` carries a `whenNotPaused` modifier and delegates to `LendingPoolCollateralManager` via `delegatecall`. The manager enforces the fixed 50% close factor, burns the correct debt tokens, and transfers collateral with the liquidation bonus applied.
+`LendingPool.liquidationCall` delegates to `LendingPoolCollateralManager`, which enforces the 50% close factor and manages collateral transfers (`whenNotPaused`).
 
 ```mermaid
 sequenceDiagram
@@ -75,7 +181,7 @@ sequenceDiagram
     participant TokD as Debt ERC20
 
     K->>LP: liquidationCall(collateralAsset, debtAsset, user, repayAmount, receiveAToken)
-    note right of LP: modifier whenNotPaused
+    note right of LP: whenNotPaused
     LP->>CM: delegatecall liquidation logic
     CM->>PO: fetch prices & recompute HF(user)
     CM-->>K: revert if HF ≥ 1
@@ -100,6 +206,6 @@ sequenceDiagram
 ```
 
 ## Notes
-- Each flow calls `reserve.updateState()` before minting or burning tokens so scaled balances reflect accrued interest.
-- `setPoolPause(true)` blocks these entry points entirely. Freezing a reserve prevents new deposits/borrows but still allows repayments and liquidations.
-- Flash-loan adapters (e.g., Uniswap/ParaSwap helpers) plug into the same flows by acting as flash-loan receivers; they must settle the flash debt plus premium within the transaction.
+- Every flow calls `reserve.updateState()` before token mint/burn to keep scaled balances accurate.
+- `setPoolPause(true)` blocks all entry points; freezing a reserve stops new supply/borrow but still allows repayments and liquidations.
+- Flash-loan adapters (Uniswap/ParaSwap helpers) interact with these flows by acting as flash-loan receivers, repaying principal plus premium within the same transaction.

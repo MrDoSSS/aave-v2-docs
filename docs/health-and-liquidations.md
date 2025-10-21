@@ -53,5 +53,3 @@ HF = (80 × 0.825) / 70 = 0.942  → liquidatable
 4. **Debt Burn:** Stable or variable debt tokens are burned proportionally using the updated borrow index.
 5. **Collateral Seizure:** Collateral worth `repayAmount × (1 + liquidationBonus)` is transferred to the liquidator (in aTokens if `receiveAToken = true`, otherwise as underlying).
 6. **Event & Accounting:** `LiquidationCall` event is emitted; reserve indexes are updated so remaining users see new interest accrual states.
-
-Liquidation protocol fees (introduced in v3) are absent in v2, so the entire liquidation bonus goes to the liquidator.***
